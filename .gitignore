@@ -1,3 +1,14 @@
+# binaries
+/ancienttrees
+/serve
+/verify
+/bin/
+
+# local artifacts
+*.out
+*.prof
+report*.json
+
 .env
 .env.*
 !.env.example

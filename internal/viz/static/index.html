@@ -1,0 +1,1169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>古树名木普查 · R* 树空间索引结构</title>
+<style>
+:root{
+  --bg:#0e1310; --panel:#151d17; --panel2:#1b251e; --line:#28382e;
+  --ink:#e0eae2; --dim:#93a79a; --faint:#5f7367;
+  --gold:#d9b05f; --leaf:#7fcf92; --node:#5aa9d6; --hit:#e58b5a;
+  --bad:#e07070; --accent:#a8d8a0;
+  --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg);color:var(--ink);
+  font:13px/1.55 -apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+header{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:9px 16px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#141d17,#0f1510);
+}
+header h1{font-size:14px;font-weight:600;margin:0 10px 0 0;letter-spacing:.02em;white-space:nowrap}
+header h1 span{color:var(--gold)}
+header .sub{color:var(--dim);font-size:11.5px;white-space:nowrap}
+header .spacer{flex:1}
+.badge{
+  font-family:var(--mono);font-size:11px;color:var(--dim);
+  border:1px solid var(--line);border-radius:999px;padding:2px 10px;white-space:nowrap;
+}
+.badge b{color:var(--ink);font-weight:500}
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;position:relative;min-width:0;background:
+  radial-gradient(1100px 560px at 50% -10%,#16211a 0%,#0d120f 70%)}
+canvas{display:block;width:100%;height:100%;cursor:grab}
+canvas.dragging{cursor:grabbing}
+canvas.boxing{cursor:crosshair}
+aside{
+  width:404px;flex:none;border-left:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0;background:var(--panel)
+}
+.tabs{display:flex;border-bottom:1px solid var(--line);flex:none}
+.tabs button{
+  flex:1;background:none;border:0;border-bottom:2px solid transparent;
+  color:var(--dim);font:inherit;font-size:12px;padding:9px 4px;cursor:pointer
+}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--gold);background:#1a241d}
+.tabbody{flex:1;overflow-y:auto;padding:12px 14px 32px;min-height:0}
+.tabbody::-webkit-scrollbar{width:9px}
+.tabbody::-webkit-scrollbar-thumb{background:#2a3a30;border-radius:5px}
+section{margin-bottom:17px}
+section h2{
+  font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--faint);margin:0 0 8px;display:flex;align-items:center;gap:8px
+}
+section h2::after{content:"";flex:1;height:1px;background:var(--line)}
+.row{display:flex;align-items:center;gap:8px;margin:7px 0}
+.row>label{color:var(--dim);font-size:12px;flex:none;min-width:44px}
+.row input[type=range]{flex:1;accent-color:var(--gold);height:3px}
+.row .val{font-family:var(--mono);font-size:11px;color:var(--gold);min-width:56px;text-align:right}
+input[type=number],input[type=text],input[type=date],select{
+  background:#0f1612;border:1px solid var(--line);color:var(--ink);
+  border-radius:5px;padding:4px 6px;font-family:var(--mono);font-size:11px;width:100%
+}
+input[type=date]{padding:3px 5px}
+.btn{
+  background:#213027;border:1px solid #32463a;color:var(--ink);border-radius:6px;
+  padding:6px 11px;font:inherit;font-size:12px;cursor:pointer;transition:.12s
+}
+.btn:hover{background:#2a3d31;border-color:#4a6353}
+.btn.primary{background:#3b3120;border-color:#6a5731;color:#f1d99d}
+.btn.primary:hover{background:#4a3d26}
+.btn.wide{width:100%;margin-top:6px}
+.btn:disabled{opacity:.45;cursor:default}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid4{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px}
+.kv .k{color:var(--dim);white-space:nowrap}
+.kv .v{font-family:var(--mono);text-align:right;font-size:11.5px}
+.kv .v.good{color:var(--leaf)}
+.kv .v.warn{color:var(--hit)}
+.kv .v.bad{color:var(--bad)}
+.legend{display:flex;flex-wrap:wrap;gap:5px 13px;font-size:11px;color:var(--dim)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.lvlrow{
+  display:grid;grid-template-columns:42px 1fr 92px;align-items:center;
+  gap:8px;padding:4px 6px;border-radius:5px;cursor:pointer;font-size:12px
+}
+.lvlrow:hover{background:#1c271f}
+.lvlrow.sel{background:#233026;box-shadow:inset 0 0 0 1px #3f5a49}
+.lvlrow .name{font-family:var(--mono);color:var(--dim);font-size:11px}
+.lvlrow .bar{height:8px;border-radius:2px;background:#18221b;position:relative;overflow:hidden}
+.lvlrow .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:2px}
+.lvlrow .n{font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--dim);white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{color:var(--faint);font-weight:500;text-align:right;padding:4px;border-bottom:1px solid var(--line);font-size:10.5px;letter-spacing:.05em;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{padding:3.5px 4px;border-bottom:1px solid #1e2922;font-family:var(--mono);font-size:11px}
+tr.hl td{color:var(--gold)}
+.hint{color:var(--faint);font-size:11px;line-height:1.65;margin:6px 0 0}
+code{font-family:var(--mono);color:var(--gold);font-size:11px}
+#hud{
+  position:absolute;left:13px;top:11px;max-width:calc(100% - 26px);pointer-events:none;
+  font-family:var(--mono);font-size:11.5px;color:var(--dim);
+  display:flex;flex-direction:column;gap:5px
+}
+#hud .line{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+#hud .chip{
+  background:#111a14d9;border:1px solid #24342a;border-radius:6px;
+  padding:2px 8px;backdrop-filter:blur(6px);
+}
+#hud .chip b{color:var(--ink);font-weight:500}
+#hud .chip.gold{border-color:#5a492a;color:var(--gold)}
+#hud .chip.hit{border-color:#5e3b29;color:var(--hit)}
+#hud .chip.leaf{border-color:#2c4b35;color:var(--leaf)}
+#tip{
+  position:absolute;pointer-events:none;display:none;z-index:20;
+  background:#0a0f0c;border:1px solid #32463a;border-radius:6px;
+  padding:6px 9px;font-size:11px;font-family:var(--mono);color:var(--ink);
+  box-shadow:0 8px 28px #000a;max-width:300px;line-height:1.7
+}
+#tip .d{color:var(--dim)}
+#scalebar{
+  position:absolute;right:16px;bottom:13px;font-family:var(--mono);font-size:10.5px;
+  color:var(--dim);display:flex;align-items:center;gap:8px;pointer-events:none
+}
+#scalebar .bar{height:4px;border:1px solid var(--faint);border-top:0}
+#loading{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:#0d120fdd;color:var(--dim);font-family:var(--mono);font-size:12px;z-index:30;
+  transition:opacity .3s
+}
+#loading.hide{opacity:0;pointer-events:none}
+#toast{
+  position:absolute;left:50%;bottom:20px;transform:translateX(-50%);
+  background:#1a2a20;border:1px solid #3f5a49;color:var(--ink);
+  border-radius:6px;padding:7px 14px;font-size:12px;opacity:0;transition:.25s;
+  pointer-events:none;z-index:25;max-width:82%;text-align:center
+}
+#toast.show{opacity:1}
+.tag{display:inline-block;padding:0 6px;border-radius:4px;font-size:10px;line-height:16px;border:1px solid}
+.tag.on{border-color:#4a7a53;color:var(--leaf);background:#192a1e}
+.tag.off{border-color:#5c4a2f;color:var(--hit);background:#2a2117}
+.check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);margin:5px 0;cursor:pointer}
+.check input{accent-color:var(--gold);flex:none}
+.pill{display:inline-flex;gap:4px;flex-wrap:wrap}
+.pill button{
+  background:#18231c;border:1px solid var(--line);color:var(--dim);border-radius:999px;
+  padding:2px 9px;font-size:11px;font-family:var(--mono);cursor:pointer
+}
+.pill button.on{border-color:#6a5731;color:var(--gold);background:#241f14}
+.sep{height:1px;background:var(--line);margin:10px 0}
+.big{font-family:var(--mono);font-size:19px;color:var(--ink)}
+.big small{font-size:11px;color:var(--faint)}
+details{border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin-top:8px}
+summary{cursor:pointer;color:var(--dim);font-size:11.5px}
+details p{margin:6px 0 0;font-size:11.5px;color:var(--dim);line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>古树名木普查 · <span>R* 树</span>空间索引</h1>
+  <span class="sub">分层外接矩形 · 每层重叠/覆盖面积 · 单次查询的节点访问</span>
+  <span class="spacer"></span>
+  <span class="badge">古树 <b id="b-rec">—</b></span>
+  <span class="badge">维度 <b id="b-dim">—</b></span>
+  <span class="badge">树高 <b id="b-height">—</b></span>
+  <span class="badge">节点 <b id="b-nodes">—</b></span>
+  <span class="badge">构建 <b id="b-build">—</b></span>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud"></div>
+    <div id="tip"></div>
+    <div id="scalebar"><span id="sb-label"></span><span class="bar" id="sb-bar"></span></div>
+    <div id="toast"></div>
+    <div id="loading">正在加载索引…</div>
+  </div>
+  <aside>
+    <div class="tabs">
+      <button data-tab="query" class="on">查询</button>
+      <button data-tab="levels">分层与重叠</button>
+      <button data-tab="quality">建树与对比</button>
+    </div>
+
+    <!-- ============================================================ query -->
+    <div class="tabbody" id="tab-query">
+      <section>
+        <h2>索引概况</h2>
+        <div class="kv" id="kv-meta"></div>
+      </section>
+
+      <section>
+        <h2>图层</h2>
+        <label class="check"><input type="checkbox" id="show-crowns" checked>树冠多边形</label>
+        <label class="check"><input type="checkbox" id="show-sample" checked>巡查抽样点</label>
+        <label class="check"><input type="checkbox" id="show-mbr" checked>命中树的外接矩形（橙）</label>
+        <label class="check"><input type="checkbox" id="show-all-nodes" checked>显示未访问节点</label>
+        <label class="check"><input type="checkbox" id="show-entry-rects">显示节点内每个条目的矩形</label>
+      </section>
+
+      <section>
+        <h2>节点层</h2>
+        <div class="row">
+          <label>只看</label>
+          <input type="range" id="level-slider" min="-1" max="4" value="-1" step="1">
+          <span class="val" id="level-val">全部</span>
+        </div>
+        <div id="level-legend" class="legend"></div>
+        <p class="hint">叶子层 L0 是古树条目的外接矩形；L1 以上是索引节点。滑块与下方图例都可切换单层。</p>
+      </section>
+
+      <section>
+        <h2>范围查询（巡查片区 / 施工红线）</h2>
+        <div class="grid4">
+          <input type="number" id="q-minx" step="1" title="minX">
+          <input type="number" id="q-miny" step="1" title="minY">
+          <input type="number" id="q-maxx" step="1" title="maxX">
+          <input type="number" id="q-maxy" step="1" title="maxY">
+        </div>
+        <div id="date-range" style="display:none;margin-top:8px">
+          <label class="check"><input type="checkbox" id="use-date">限定巡查日期（第三维）</label>
+          <div class="grid4">
+            <input type="date" id="q-from">
+            <input type="date" id="q-to">
+          </div>
+        </div>
+        <div class="grid2" style="margin-top:8px">
+          <button class="btn primary" id="btn-query">Shift+拖框查询</button>
+          <button class="btn" id="btn-query-here">用输入框查询</button>
+        </div>
+        <label class="check"><input type="checkbox" id="crown-exact">树冠多边形精确相交（先过矩形）</label>
+        <label class="check"><input type="checkbox" id="auto-query" checked>拖框松手立即查询</label>
+        <div class="grid2" style="margin-top:6px">
+          <button class="btn" id="btn-fit">看整座城市</button>
+          <button class="btn" id="btn-fit-query">回查询框</button>
+        </div>
+        <p class="hint">在地图上按住 Shift 拖动即画查询框；不按 Shift 拖动是平移，滚轮缩放。</p>
+      </section>
+
+      <section>
+        <h2>巡查员：身边 100 米内的古树</h2>
+        <div class="row">
+          <label>半径</label>
+          <input type="range" id="rad-slider" min="20" max="300" step="10" value="100">
+          <span class="val" id="rad-val">100 m</span>
+        </div>
+        <button class="btn wide" id="btn-within">右键地图，查该位置身旁的古树</button>
+        <p class="hint">先用外接矩形过索引，再对树冠多边形算精确距离；命中按距离排序。</p>
+      </section>
+
+      <section>
+        <h2>最近邻</h2>
+        <div class="row">
+          <label>k =</label>
+          <input type="range" id="k-slider" min="1" max="40" value="8">
+          <span class="val" id="k-val">8</span>
+        </div>
+        <label class="check"><input type="checkbox" id="knn-poly">按树冠多边形距离精化</label>
+        <button class="btn wide" id="btn-knn">右键地图查询最近 k 棵</button>
+        <p class="hint">按到外接矩形的最小距离用优先队列逐个出队，取前 k 个即停；勾选精化后按到树冠多边形的真实距离排序。</p>
+      </section>
+
+      <section>
+        <h2>本次查询</h2>
+        <div id="query-stats"><p class="hint">拖一个框，这里显示访问了多少节点、命中了多少古树。</p></div>
+      </section>
+    </div>
+
+    <!-- ============================================================ levels -->
+    <div class="tabbody" id="tab-levels" style="display:none">
+      <section>
+        <h2>每层：覆盖面积与重叠面积</h2>
+        <div id="level-list"></div>
+        <div id="ov2-box" style="display:none;margin-top:12px">
+          <h2 style="margin-top:0">平面索引对照（树冠查询实际使用）</h2>
+          <table>
+            <thead><tr><th>层</th><th>节点</th><th>覆盖</th><th>两两重叠</th><th>重/覆</th></tr></thead>
+            <tbody id="ov2-table"></tbody>
+          </table>
+        </div>
+        <table style="margin-top:10px">
+          <thead><tr><th>层</th><th>节点</th><th>覆盖</th><th>两两重叠</th><th>同父重叠</th><th>重/覆</th></tr></thead>
+          <tbody id="level-table"></tbody>
+        </table>
+        <p class="hint">
+          覆盖面积 = 该层全部节点外接矩形的并集面积。「两两重叠」= 该层任意两个节点外接矩形相交面积之和；
+          「同父重叠」只统计同一父节点下的兄弟节点，是 R* 分裂启发式直接压的量；
+          两两重叠还包含不同子树之间的偶然相交，因此通常明显更大。
+        </p>
+        <p class="hint" id="projected-note" style="display:none">
+          当前是三维索引：日期轴上的条目是零厚度薄片，三维并集体积恒为 0，面积按树冠投影（前两轴）统计。
+          三维分裂会优先沿日期切开，节点 MBR 投影到平面上是很长的空间条带，所以下表的投影重叠会非常大。
+          下方的平面索引对照才是树冠相交与最近邻实际使用的索引。
+        </p>
+
+      </section>
+      <section>
+        <h2>本次查询逐层访问</h2>
+        <div id="qlevel"><p class="hint">先执行一次查询。</p></div>
+      </section>
+      <section>
+        <h2>节点填充</h2>
+        <div class="kv" id="fill-kv"></div>
+      </section>
+    </div>
+
+    <!-- ============================================================ quality -->
+    <div class="tabbody" id="tab-quality" style="display:none">
+      <section>
+        <h2>逐条插入 vs STR 打包</h2>
+        <table>
+          <thead><tr><th></th><th>逐条插入</th><th>STR 打包</th></tr></thead>
+          <tbody id="bulk-table"></tbody>
+        </table>
+        <p class="hint" id="bulk-note"></p>
+        <button class="btn wide" id="btn-bulk">用 STR 重建当前索引</button>
+      </section>
+      <section>
+        <h2>强制重插入：开 / 关</h2>
+        <div id="ab-panel"><p class="hint">在同一批树上分别开关强制重插入建两棵树，用同一批查询对比访问节点数与整树重叠面积。</p></div>
+        <button class="btn wide" id="btn-ab">运行同批查询对比（约 1–3 秒）</button>
+      </section>
+      <section>
+        <h2>增删（看结构变化）</h2>
+        <div class="grid2">
+          <input type="number" id="mut-n" value="300" min="1" max="5000" title="数量">
+          <input type="number" id="mut-r" value="120" min="10" max="5000" title="半径 m">
+        </div>
+        <div class="grid2" style="margin-top:8px">
+          <button class="btn" id="btn-insert">框中心插入</button>
+          <button class="btn" id="btn-delete">框内删除</button>
+        </div>
+        <p class="hint">删除会触发 R* 收缩：节点低于半满就整个拆掉，其中条目原层重新插入。</p>
+      </section>
+      <section>
+        <h2>整树一致性验证</h2>
+        <button class="btn wide" id="btn-verify">运行完整对拍</button>
+        <div id="verify-panel"><p class="hint">完整对拍用命令行运行 <code>go run ./cmd/verify</code>：4.5 万棵树、26 万次插入/删除/范围/最近邻/红线查询，每次都与暴力遍历比对。</p></div>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+// ===================================================================== state
+const LEVEL_COLORS = ["#4a7f9e","#5f9e6e","#a8914f","#9b6b9e","#6f7fb8","#b06f5f"];
+const S = {
+  meta:null, nodes:[], nodeByID:new Map(), labels:[], records:new Map(),
+  treeDim:2, levelCount:1, visibleLevel:-1,
+  query:null, queryBox:null, knn:null, ab:null,
+  view:{x:0,y:0,scale:1},
+  canvas:null, ctx:null, dpr:1,
+  showCrowns:true, showSample:true, showMBR:true, showAllNodes:true, showEntryRects:false,
+  crownExact:false, loadTimer:null, loadingViewport:false,
+};
+
+const $ = id => document.getElementById(id);
+const fmt = n => {
+  if (n===undefined||n===null||Number.isNaN(n)) return "—";
+  const a=Math.abs(n);
+  if (a>=1e9) return (n/1e9).toFixed(2)+"G";
+  if (a>=1e6) return (n/1e6).toFixed(2)+"M";
+  if (a>=1e3) return (n/1e3).toFixed(1)+"k";
+  if (a>=100) return n.toFixed(0);
+  if (a>=1) return n.toFixed(1);
+  return n.toFixed(2);
+};
+const fmtInt = n => (n??0).toLocaleString("en-US");
+// Areas are in m^2; show km^2 once they are large enough to be unreadable.
+const fmtArea = n => {
+  if (n===undefined||n===null||Number.isNaN(n)) return "—";
+  if (Math.abs(n)>=2e6) return (n/1e6).toFixed(2)+" km²";
+  return Math.round(n).toLocaleString("en-US")+" m²";
+};
+const pct = n => (n*100).toFixed(1)+"%";
+
+// ===================================================================== view
+function w2s(x,y){ const v=S.view; return [(x-v.x)*v.scale,(y-v.y)*v.scale]; }
+function s2w(sx,sy){ const v=S.view; return [sx/v.scale+v.x, sy/v.scale+v.y]; }
+function fitBounds(b){
+  const cv=S.canvas, w=cv.clientWidth, h=cv.clientHeight;
+  const bw=Math.max(1e-6,b[2]-b[0]), bh=Math.max(1e-6,b[3]-b[1]);
+  const pad=1.12;
+  const sc=Math.min(w/(bw*pad), h/(bh*pad));
+  S.view.scale=sc;
+  S.view.x=b[0]-(w/sc-bw)/2;
+  S.view.y=b[1]-(h/sc-bh)/2;
+}
+function viewportBox(){
+  const w=S.canvas.clientWidth, h=S.canvas.clientHeight;
+  const [x0,y0]=s2w(0,0), [x1,y1]=s2w(w,h);
+  return [x0,y0,x1,y1];
+}
+function resize(){
+  const cv=S.canvas, st=cv.parentElement;
+  S.dpr=window.devicePixelRatio||1;
+  cv.width=Math.round(st.clientWidth*S.dpr);
+  cv.height=Math.round(st.clientHeight*S.dpr);
+  S.ctx.setTransform(S.dpr,0,0,S.dpr,0,0);
+  draw();
+}
+// ===================================================================== draw
+function draw(){
+  const ctx=S.ctx, cv=S.canvas, w=cv.clientWidth, h=cv.clientHeight;
+  ctx.clearRect(0,0,w,h);
+  drawGrid(ctx,w,h);
+  const q=S.query;
+  const visited = q ? new Map(q.trace.map(v=>[v.id,v])) : null;
+  const visLevel = S.visibleLevel;
+  const pad=40;
+
+  // 1. Nodes. Draw from high level (coarse) to level 0 so fine boxes sit on
+  //    top; unvisited nodes are very dim when a query is active.
+  const ordered = S.nodes.filter(n=>visLevel<0 || n.level===visLevel)
+    .slice().sort((a,b)=>b.level-a.level);
+  for(const n of ordered){
+    const b=n.bounds;
+    const a=w2s(b[0],b[1]), c=w2s(b[2],b[3]);
+    if(c[0]<-pad||c[1]<-pad||a[0]>w+pad||a[1]>h+pad) continue;
+    const v = visited ? visited.get(n.id) : null;
+    const lc = LEVEL_COLORS[n.level % LEVEL_COLORS.length];
+    if(v){
+      const hot=v.hits>0;
+      if(n.level===0 && S.view.scale<0.5){
+        // At city scale a leaf MBR is a few pixels; its outline is noise.
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = hot?0.75:0.4;
+      ctx.strokeStyle = hot ? lc : "#6d8f7b";
+      ctx.lineWidth = hot ? 1.2 : 0.9;
+      if(!hot) ctx.setLineDash([3,4]);
+      ctx.strokeRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+      if(hot && n.level>0){
+        ctx.globalAlpha=0.06; ctx.fillStyle=lc;
+        ctx.fillRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+      }
+      if(S.showEntryRects && !n.leaf){
+        ctx.globalAlpha=0.35; ctx.setLineDash([]); ctx.strokeStyle=lc; ctx.lineWidth=0.8;
+        for(const e of n.entries){
+          const eb=e.bounds;
+          const p=w2s(eb[0],eb[1]), r=w2s(eb[2],eb[3]);
+          ctx.strokeRect(p[0],p[1],r[0]-p[0],r[1]-p[1]);
+        }
+      }
+      ctx.restore();
+    } else if(S.showAllNodes || !q){
+      if(n.level===0 && (q||S.nodes.length>2500)){
+        // Leaves are numerous; keep them as faint hairlines.
+        ctx.save();
+        ctx.globalAlpha=(q?0.10:0.16);
+        ctx.strokeStyle=lc; ctx.lineWidth=0.5;
+        ctx.strokeRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.globalAlpha=0.26 - 0.04*Math.min(4,n.level);
+        ctx.strokeStyle=lc; ctx.lineWidth=1;
+        ctx.strokeRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+        ctx.restore();
+      }
+    }
+  }
+
+  // 2. Trees. Below ~0.06 px/m a 10 m crown is sub-pixel, so draw points;
+  //    above that draw the actual crown polygons.
+  const recs=[...S.records.values()];
+  const detailed=S.view.scale>0.10;
+  const hits=q?(q._hitset||(q._hitset=new Set(q.ids))):null;
+  if(S.showCrowns){
+    for(const r of recs){
+      const p=w2s(r.x,r.y);
+      if(p[0]<-pad||p[1]<-pad||p[0]>w+pad||p[1]>h+pad) continue;
+      if(detailed){ drawCrown(ctx,r,false); continue; }
+      ctx.beginPath(); ctx.arc(p[0],p[1],1.5,0,Math.PI*2);
+      ctx.fillStyle=r.sampled?"#a98b4e":"#5d8a68"; ctx.globalAlpha=0.85; ctx.fill(); ctx.globalAlpha=1;
+    }
+  }
+  if(hits){
+    for(const r of recs){
+      if(!hits.has(r.id)) continue;
+      if(detailed){ drawCrown(ctx,r,true); continue; }
+      const p=w2s(r.x,r.y);
+      ctx.beginPath(); ctx.arc(p[0],p[1],2.1,0,Math.PI*2);
+      ctx.fillStyle="#e58b5a"; ctx.globalAlpha=0.95; ctx.fill(); ctx.globalAlpha=1;
+    }
+  }
+  if(S.showSample && detailed){
+    for(const r of recs){
+      if(!r.sampled) continue;
+      const p=w2s(r.x,r.y);
+      if(p[0]<-3||p[1]<-3||p[0]>w+3||p[1]>h+3) continue;
+      ctx.beginPath(); ctx.arc(p[0],p[1],2.2,0,Math.PI*2);
+      ctx.fillStyle="#f0c869"; ctx.globalAlpha=0.95; ctx.fill(); ctx.globalAlpha=1;
+    }
+  }
+  if(S.showMBR && q){
+    const hits=q._hitset||new Set();
+    ctx.strokeStyle="#e58b5a"; ctx.lineWidth=1;
+    for(const r of recs){
+      if(!hits.has(r.id)) continue;
+      const b=r.mbr, a=w2s(b[0],b[1]), c=w2s(b[2],b[3]);
+      ctx.globalAlpha=0.7;
+      ctx.strokeRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+    }
+    ctx.globalAlpha=1;
+  }
+
+  // 3. Query box.
+  if(S.queryBox){
+    const [x0,y0,x1,y1]=S.queryBox;
+    const a=w2s(x0,y0), c=w2s(x1,y1);
+    ctx.save();
+    ctx.fillStyle="rgba(217,176,95,0.06)";
+    ctx.fillRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+    ctx.setLineDash([6,4]);
+    ctx.strokeStyle="#f0c869"; ctx.lineWidth=1.8;
+    ctx.strokeRect(a[0],a[1],c[0]-a[0],c[1]-a[1]);
+    ctx.setLineDash([]);
+    ctx.fillStyle="#f0c869";
+    const hw=Math.max(3,Math.min(7,(c[0]-a[0])*0.06)), hh=Math.max(3,Math.min(7,(c[1]-a[1])*0.06));
+    for(const [hx,hy] of [[a[0],a[1]],[c[0],a[1]],[a[0],c[1]],[c[0],c[1]]]){
+      ctx.fillRect(hx-hw/2,hy-hh/2,hw,hh);
+    }
+    ctx.restore();
+  }
+
+  // 4. KNN markers.
+  if(S.knn){
+    const mono=getComputedStyle(document.body).getPropertyValue("--mono");
+    S.knn.items.forEach((it,i)=>{
+      const p=w2s(it.x,it.y);
+      ctx.beginPath(); ctx.arc(p[0],p[1],4.6,0,Math.PI*2);
+      ctx.fillStyle="#0d120f"; ctx.fill();
+      ctx.strokeStyle="#d9b05f"; ctx.lineWidth=1.6; ctx.stroke();
+      ctx.fillStyle="#d9b05f"; ctx.font="10px "+mono;
+      ctx.fillText(String(i+1),p[0]+7,p[1]+3.5);
+    });
+  }
+  drawScale(ctx,w,h);
+}
+
+function drawGrid(ctx,w,h){
+  const step=chooseStep();
+  const [wx0,wy0]=s2w(0,0), [wx1,wy1]=s2w(w,h);
+  ctx.save();
+  ctx.strokeStyle="#182219"; ctx.lineWidth=1;
+  ctx.beginPath();
+  for(let x=Math.floor(wx0/step)*step;x<=wx1;x+=step){
+    const p=Math.round(w2s(x,0)[0])+.5;
+    ctx.moveTo(p,0); ctx.lineTo(p,h);
+  }
+  for(let y=Math.floor(wy0/step)*step;y<=wy1;y+=step){
+    const p=Math.round(w2s(0,y)[1])+.5;
+    ctx.moveTo(0,p); ctx.lineTo(w,p);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+function chooseStep(){
+  const target=95/S.view.scale;
+  const pow=Math.pow(10,Math.floor(Math.log10(target)));
+  const m=[1,2,5,10].find(k=>k*pow>=target)||10;
+  return m*pow;
+}
+function drawScale(){
+  const step=chooseStep();
+  const px=step*S.view.scale;
+  $("sb-bar").style.width=px+"px";
+  $("sb-label").textContent = step>=1000 ? (step/1000)+" km" : step+" m";
+}
+function drawCrown(ctx,r,hit){
+  const ring=r.crown;
+  if(!ring||ring.length<3) return;
+  ctx.beginPath();
+  let p=w2s(ring[0][0],ring[0][1]);
+  ctx.moveTo(p[0],p[1]);
+  for(let i=1;i<ring.length;i++){
+    p=w2s(ring[i][0],ring[i][1]);
+    ctx.lineTo(p[0],p[1]);
+  }
+  ctx.closePath();
+  if(hit){
+    ctx.fillStyle="rgba(229,139,90,0.38)";
+    ctx.fill();
+    ctx.strokeStyle="#f2a26f"; ctx.lineWidth=1.2; ctx.stroke();
+  } else {
+    ctx.fillStyle=r.sampled?"rgba(93,138,97,0.28)":"rgba(74,116,82,0.42)";
+    ctx.fill();
+    ctx.strokeStyle="#3b5a43"; ctx.lineWidth=0.6; ctx.stroke();
+  }
+}
+
+// ===================================================================== api
+async function api(path,opt){
+  const res=await fetch(path,opt);
+  let j;
+  try{ j=await res.json(); }catch(e){ throw new Error(res.status+" "+res.statusText); }
+  if(!res.ok) throw new Error(j.error||res.statusText);
+  return j;
+}
+const post=(path,body)=>api(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+function toast(msg){
+  const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),2800);
+}
+
+// ===================================================================== load
+async function loadMeta(){
+  S.meta=await api("/api/meta");
+  S.treeDim=S.meta.dim;
+  $("b-rec").textContent=fmtInt(S.meta.records);
+  $("b-dim").textContent=S.meta.dim===3?"3D":"2D";
+  $("b-height").textContent=S.meta.height;
+  $("b-nodes").textContent=fmtInt(S.meta.nodes);
+  $("b-build").textContent="STR "+S.meta.build.bulkMs+"ms";
+  renderMeta(); renderBulk();
+}
+async function loadTree(){
+  const t=await api("/api/tree");
+  S.nodes=t.nodes; S.labels=t.labels;
+  S.nodeByID=new Map(S.nodes.map(n=>[n.id,n]));
+  S.levelCount=Math.max(1,t.height+1);
+  const sl=$("level-slider");
+  sl.max=String(S.levelCount-1);
+  if(+sl.value>=S.levelCount) sl.value="-1";
+  $("b-height").textContent=t.height;
+  $("b-nodes").textContent=fmtInt(t.nodes.length);
+  renderLegend(); renderLevels(); renderFill();
+}
+async function loadSampleRecords(){
+  const r=await api("/api/records?sample=5200");
+  for(const rec of r) S.records.set(rec.id,rec);
+}
+async function loadViewportRecords(){
+  if(S.loadingViewport) return;
+  S.loadingViewport=true;
+  try{
+    const [x0,y0,x1,y1]=viewportBox();
+    const r=await api(`/api/records?minx=${x0}&miny=${y0}&maxx=${x1}&maxy=${y1}&limit=2600`);
+    for(const rec of r) S.records.set(rec.id,rec);
+  }catch(e){ /* viewport fetch is best-effort */ }
+  S.loadingViewport=false;
+  draw();
+}
+function scheduleViewportLoad(){
+  clearTimeout(S.loadTimer);
+  S.loadTimer=setTimeout(loadViewportRecords,220);
+}
+async function ensureHitsLoaded(){
+  if(!S.query) return;
+  const missing=S.query.ids.filter(id=>!S.records.has(id));
+  for(let i=0;i<missing.length;i+=180){
+    const ids=missing.slice(i,i+180).join(",");
+    const r=await api("/api/records?ids="+ids);
+    for(const rec of r) S.records.set(rec.id,rec);
+  }
+}
+
+// ===================================================================== panels
+function renderMeta(){
+  const m=S.meta, ov=m.overlap;
+  $("kv-meta").innerHTML=[
+    ["古树",fmtInt(m.records)+" 棵"],
+    ["城区片区",fmtInt(m.clusters)+" 个"],
+    ["索引维度",m.dim===3?"3D（坐标×2 + 巡查日期）":"2D（树冠外接矩形）"],
+    ["树高 / 节点",m.height+" / "+fmtInt(m.nodes)],
+    ["节点容量",m.config.MaxEntries+"（半满 "+m.config.MinEntries+"）"],
+    ["强制重插入",m.config.ForcedReinsert?'<span class="tag on">开</span>':'<span class="tag off">关</span>'],
+    ["叶子层覆盖",fmtArea(leafStat(ov,"coverArea"))],
+    ["叶子层两两重叠",fmtArea(leafStat(ov,"overlapArea"))],
+  ].map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+  $("date-range").style.display = m.dim===3 ? "" : "none";
+  if(m.dim===3){
+    const now=new Date("2026-11-22");
+    const from=new Date(now); from.setDate(from.getDate()-90);
+    const iso=d=>d.toISOString().slice(0,10);
+    if(!$("q-from").value) $("q-from").value=iso(from);
+    if(!$("q-to").value) $("q-to").value=iso(now);
+  }
+  $("projected-note").style.display = m.dim===3 ? "" : "none";
+  const b=m.bounds;
+  if(!$("q-minx").value){
+    const cx=(b[0]+b[2])/2, cy=(b[1]+b[3])/2;
+    setInputs([cx-160,cy-160,cx+160,cy+160]);
+  }
+}
+function leafOverlap(meta){
+  const lv=(meta.overlap&&meta.overlap.levels||[]).find(l=>l.level===0);
+  return lv?lv.overlapArea:0;
+}
+function renderOv2(){
+  const ov2=S.meta&&S.meta.overlap2d;
+  const box=$("ov2-box");
+  if(!ov2 || !ov2.levels || !ov2.levels.length || S.meta.dim!==3){ box.style.display="none"; return; }
+  box.style.display="";
+  $("ov2-table").innerHTML=ov2.levels.map(l=>`
+    <tr><td style="color:${LEVEL_COLORS[l.level%LEVEL_COLORS.length]}">L${l.level}</td>
+    <td>${fmtInt(l.nodes)}</td><td>${fmtArea(l.coverArea)}</td>
+    <td>${fmtArea(l.overlapArea)}</td>
+    <td>${(l.overlapRatio*100).toFixed(1)}%</td></tr>`).join("");
+}
+function leafStat(ov, key){
+  const lv=(ov&&ov.levels||[]).find(l=>l.level===0);
+  return lv?lv[key]:0;
+}
+function renderBulk(){
+  const b=S.meta.build;
+  $("bulk-table").innerHTML=[
+    ["树高",S.meta.height,b.bulkHeight],
+    ["节点总数",fmtInt(S.meta.nodes),fmtInt(b.bulkNodes)],
+    ["叶子填充率",pct(S.meta.overlap.fillFactor),pct(b.bulkLeafFill)],
+    ["叶子层两两重叠",fmtArea(leafStat(S.meta.overlap,"overlapArea")),fmtArea(b.bulkOverlapArea)],
+    ["建树耗时",b.insertionMs+" ms",b.bulkMs+" ms"],
+  ].map(([k,a,c])=>`<tr><td>${k}</td><td>${a}</td><td class="hl">${c}</td></tr>`).join("");
+  $("bulk-note").textContent="STR 打包按坐标排序切片：叶子几乎填满、树更矮，叶子层外接矩形重叠远小于逐条插入（后者受历史插入顺序影响）。层号越高、节点越少，两两重叠里不同子树的偶然相交占比越大，不宜跨层直接比较。两种树的查询结果完全一致（验证程序逐次比对）。";
+}
+function renderLegend(){
+  const el=$("level-legend");
+  let html="";
+  for(let l=0;l<S.levelCount;l++){
+    const c=LEVEL_COLORS[l%LEVEL_COLORS.length];
+    const count=S.nodes.filter(n=>n.level===l).length;
+    html+=`<span data-level="${l}" style="cursor:pointer"><i style="background:${c}"></i>L${l}${l===0?" 叶子":""} · ${count}</span>`;
+  }
+  el.innerHTML=html;
+  el.querySelectorAll("span[data-level]").forEach(sp=>{
+    sp.addEventListener("click",()=>{
+      const lv=+sp.dataset.level;
+      setVisibleLevel(S.visibleLevel===lv?-1:lv);
+    });
+  });
+}
+function setVisibleLevel(lv){
+  S.visibleLevel=lv;
+  $("level-slider").value=String(lv);
+  $("level-val").textContent=lv<0?"全部":"L"+lv;
+  renderLevels(); draw();
+}
+function levelStats(){ return (S.meta&&S.meta.overlap)?S.meta.overlap.levels:[]; }
+function renderLevels(){
+  const levels=levelStats();
+  const list=$("level-list"), table=$("level-table");
+  if(!levels.length){ list.innerHTML=""; table.innerHTML=""; return; }
+  const maxCover=Math.max(...levels.map(l=>l.coverArea),1);
+  const maxOv=Math.max(...levels.map(l=>l.overlapArea),1);
+  list.innerHTML=levels.slice().reverse().map(l=>{
+    const c=LEVEL_COLORS[l.level%LEVEL_COLORS.length];
+    const w1=(l.coverArea/maxCover*100).toFixed(1);
+    const w2=(l.overlapArea/maxOv*100).toFixed(1);
+    const sel=S.visibleLevel===l.level?" sel":"";
+    return `<div class="lvlrow${sel}" data-level="${l.level}">
+      <span class="name" style="color:${c}">L${l.level}</span>
+      <span class="bar"><span class="fill" style="width:${w1}%;background:${c};opacity:.8"></span></span>
+      <span class="n">${fmtInt(l.nodes)} 节点</span>
+    </div>
+    <div class="lvlrow${sel}" style="padding-top:0" data-level="${l.level}">
+      <span></span>
+      <span class="bar" style="height:5px"><span class="fill" style="width:${w2}%;background:#e58b5a;opacity:.85"></span></span>
+      <span class="n" title="重叠面积">${fmtArea(l.overlapArea)}</span>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".lvlrow").forEach(el=>{
+    el.addEventListener("click",()=>{
+      const lv=+el.dataset.level;
+      setVisibleLevel(S.visibleLevel===lv?-1:lv);
+    });
+  });
+  table.innerHTML=levels.map(l=>`
+    <tr><td style="color:${LEVEL_COLORS[l.level%LEVEL_COLORS.length]}">L${l.level}</td>
+    <td>${fmtInt(l.nodes)}</td><td>${fmtArea(l.coverArea)}</td>
+    <td>${fmtArea(l.overlapArea)}</td><td>${fmtArea(l.siblingOverlapArea)}</td>
+    <td class="${l.overlapRatio>0.6?'':'hl'}">${l.overlapRatio>5?'投影 '+ (l.overlapRatio*100).toFixed(0)+'%':(l.overlapRatio*100).toFixed(1)+'%'}</td></tr>`).join("");
+}
+function renderFill(){
+  const levels=levelStats();
+  if(!levels.length) return;
+  const leaf=levels[0];
+  $("fill-kv").innerHTML=[
+    ["叶子节点数",fmtInt(leaf.nodes)],
+    ["平均填充",leaf.avgFill.toFixed(1)+" / "+S.meta.config.MaxEntries],
+    ["最小 / 最大填充",leaf.minFill+" / "+leaf.maxFill],
+    ["叶子层覆盖",fmtArea(leaf.coverArea)],
+    ["叶子层重叠",fmtArea(leaf.overlapArea)],
+    ["叶子层每节点平均被重叠",fmtArea(leaf.meanOverlapPerNode)],
+  ].map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+}
+function renderQueryStats(){
+  const q=S.query, el=$("query-stats");
+  if(!q){ el.innerHTML='<p class="hint">拖一个框，这里显示访问了多少节点、命中了多少古树。</p>'; return; }
+  const total=S.nodes.length;
+  const visitedPct=total?q.nodesVisited/total*100:0;
+  const ok=q.bruteCount===q.ids.length;
+  el.innerHTML=`
+    <div class="kv">
+      <div class="k">命中古树</div><div class="v good">${fmtInt(q.ids.length)} 棵</div>
+      <div class="k">访问节点</div><div class="v">${fmtInt(q.nodesVisited)} / ${fmtInt(total)}（${visitedPct.toFixed(2)}%）</div>
+      <div class="k">检查叶子条目</div><div class="v">${fmtInt(q.leafEntries)}</div>
+      <div class="k">索引耗时</div><div class="v">${q.queryMs.toFixed(3)} ms</div>
+      <div class="k">暴力遍历</div><div class="v warn">${q.bruteMs.toFixed(3)} ms</div>
+      <div class="k">结果比对</div><div class="v ${ok?'good':'bad'}">${ok?'与暴力一致':'不一致：'+q.ids.length+' / '+q.bruteCount}</div>
+    </div>
+    <p class="hint">索引只沿与查询框相交的分支下降，未相交的整棵子树一块也不访问；橙框是实际访问到的节点。</p>`;
+  const levels=q.levelCount||{};
+  const keys=Object.keys(levels).map(Number).sort((a,b)=>b-a);
+  $("qlevel").innerHTML=keys.map(l=>`
+    <div class="lvlrow" style="cursor:default">
+      <span class="name" style="color:${LEVEL_COLORS[l%LEVEL_COLORS.length]}">L${l}</span>
+      <span class="bar"><span class="fill" style="width:${Math.min(100,levels[l]/Math.max(1,q.nodesVisited)*100)}%;background:${LEVEL_COLORS[l%LEVEL_COLORS.length]}"></span></span>
+      <span class="n">访问 ${levels[l]}</span>
+    </div>`).join("")+
+    `<p class="hint">L0 是叶子层。本次共有 ${Object.values(q.skippedCount||{}).reduce((a,b)=>a+b,0)} 个节点因矩形不相交被整块跳过。</p>`;
+}
+function renderAB(ab){
+  $("ab-panel").innerHTML=`
+  <div class="kv">
+    <div class="k">平均访问节点 / 查询</div><div class="v">
+      <span class="good">${ab.onAvgNodes.toFixed(2)}</span>（开） · <span class="warn">${ab.offAvgNodes.toFixed(2)}</span>（关）</div>
+    <div class="k">开启后变化</div><div class="v ${ab.nodesImprovementPct>=0?'good':'bad'}">
+      ${ab.nodesImprovementPct>=0?'少':'多'} ${Math.abs(ab.nodesImprovementPct).toFixed(1)}% 节点访问</div>
+    <div class="k">平均检查叶子条目</div><div class="v">${ab.onAvgLeaf.toFixed(2)} · ${ab.offAvgLeaf.toFixed(2)}</div>
+    <div class="k">分裂次数</div><div class="v">${fmtInt(ab.onSplits)} · ${fmtInt(ab.offSplits)}</div>
+    <div class="k">强制重插入</div><div class="v">${fmtInt(ab.onReinsertOps)} 次 / ${fmtInt(ab.onReinserted)} 条目</div>
+    <div class="k">整树重叠面积</div><div class="v">${fmtArea(ab.onOverlapArea)} · ${fmtArea(ab.offOverlapArea)}
+      <div class="hint">${ab.overlapChangePct>=0?'+':''}${ab.overlapChangePct.toFixed(1)}%</div></div>
+    <div class="k">整树覆盖面积</div><div class="v">${fmtArea(ab.onCoverArea)} · ${fmtArea(ab.offCoverArea)}</div>
+    <div class="k">树高</div><div class="v">${ab.onHeight} · ${ab.offHeight}</div>
+    <div class="k">同批查询答案</div><div class="v ${ab.sameAnswers?'good':'bad'}">${ab.sameAnswers?'完全一致':'不一致'}</div>
+    <div class="k">总耗时</div><div class="v">${ab.ms} ms</div>
+  </div>`;
+}
+
+// ===================================================================== query
+function setInputs(b){
+  $("q-minx").value=Math.round(b[0]); $("q-miny").value=Math.round(b[1]);
+  $("q-maxx").value=Math.round(b[2]); $("q-maxy").value=Math.round(b[3]);
+}
+function getInputs(){
+  return [+$("q-minx").value,+$("q-miny").value,+$("q-maxx").value,+$("q-maxy").value];
+}
+async function runRectQuery(box){
+  box=box||getInputs();
+  const [x0,y0,x1,y1]=box;
+  if(!(x1>x0&&y1>y0)){ toast("查询框无效"); return; }
+  S.queryBox=[x0,y0,x1,y1];
+  S.knn=null;
+  S.crownExact=$("crown-exact").checked;
+  const body={min:[x0,y0],max:[x1,y1],crown:S.crownExact};
+  if(S.treeDim===3 && $("use-date").checked){
+    const from=Date.parse($("q-from").value+"T00:00:00Z");
+    const to=Date.parse($("q-to").value+"T23:59:59Z");
+    if(!Number.isNaN(from)&&!Number.isNaN(to)){ body.fromDate=from; body.toDate=to; }
+  }
+  const q=await post("/api/query",body);
+  q._hitset=new Set(q.ids);
+  S.query=q;
+  await ensureHitsLoaded();
+  renderQueryStats(); renderLevels(); updateHUD(); draw();
+  if(S.visibleLevel>=0) renderLegend();
+}
+async function runWithin(x,y){
+  const radius=+$("rad-slider").value;
+  const r=await post("/api/within",{x,y,radius});
+  S.within=r;
+  const missing=r.items.map(it=>it.id).filter(id=>!S.records.has(id));
+  if(missing.length){
+    const recs=await api("/api/records?ids="+missing.join(","));
+    for(const rec of recs) S.records.set(rec.id,rec);
+  }
+  const ok=r.bruteHits===r.items.length;
+  $("query-stats").innerHTML=`
+    <div class="kv">
+      <div class="k">半径内古树</div><div class="v good">${r.items.length} 棵</div>
+      <div class="k">外接矩形候选</div><div class="v">${fmtInt(r.mbrHits)} 棵</div>
+      <div class="k">访问节点</div><div class="v">${fmtInt(r.nodesVisited)}</div>
+      <div class="k">树冠精确判定</div><div class="v">${fmtInt(r.leafEntries)} 次</div>
+      <div class="k">索引耗时</div><div class="v">${r.queryMs.toFixed(3)} ms</div>
+      <div class="k">暴力遍历</div><div class="v warn">${r.bruteMs.toFixed(3)} ms</div>
+      <div class="k">结果比对</div><div class="v ${ok?'good':'bad'}">${ok?'与暴力一致':'不一致：'+r.items.length+' / '+r.bruteHits}</div>
+    </div>
+    <table style="margin-top:8px"><thead><tr><th>#</th><th>编号</th><th>距离 m</th><th>胸径</th><th>长势</th></tr></thead><tbody>
+    ${r.items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.code}</td><td>${it.dist.toFixed(2)}</td><td>${it.dbh.toFixed(0)}</td><td>${it.health}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="hint">${r.mbrHits} 棵的树冠外接矩形落在方框内，其中 ${r.leafEntries} 棵进入多边形精确判定，${r.items.length} 棵的树冠真正在 ${$("rad-slider").value} m 内。</p>`;
+  draw();
+}
+
+async function runKNN(x,y){
+  const k=+$("k-slider").value;
+  const body={x,y,k,polygon:$("knn-poly").checked};
+  const r=await post("/api/knn",body);
+  S.knn=r;
+  const missing=r.items.map(it=>it.id).filter(id=>!S.records.has(id));
+  if(missing.length){
+    const recs=await api("/api/records?ids="+missing.join(","));
+    for(const rec of recs) S.records.set(rec.id,rec);
+  }
+  $("query-stats").innerHTML=`
+    <div class="kv">
+      <div class="k">最近邻</div><div class="v good">${r.items.length} 棵</div>
+      <div class="k">访问节点</div><div class="v">${fmtInt(r.nodesVisit)}</div>
+      <div class="k">耗时</div><div class="v">${r.queryMs.toFixed(3)} ms</div>
+      <div class="k">第 k 距离</div><div class="v">${r.items.length?r.items[r.items.length-1].dist.toFixed(2)+" m":"—"}</div>
+    </div>
+    <table style="margin-top:8px"><thead><tr><th>#</th><th>古树</th><th>距离 m</th></tr></thead><tbody>
+    ${r.items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.id}</td><td>${it.dist.toFixed(2)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="hint">${$("knn-poly").checked?"距离按树冠多边形计算":"距离按外接矩形计算（严格是到矩形的下界）"}。</p>`;
+  draw();
+}
+function updateHUD(){
+  const q=S.query;
+  if(!q){ $("hud").innerHTML=""; return; }
+  const lv=Object.keys(q.levelCount).map(Number).sort((a,b)=>b-a)
+    .map(l=>`<span class="chip" style="color:${LEVEL_COLORS[l%LEVEL_COLORS.length]}">L${l} · ${q.levelCount[l]}</span>`).join("");
+  $("hud").innerHTML=`<div class="line">
+      <span class="chip gold">命中 <b>${fmtInt(q.ids.length)}</b> 棵</span>
+      <span class="chip">访问节点 <b>${fmtInt(q.nodesVisited)}</b> / ${fmtInt(S.nodes.length)}</span>
+      <span class="chip">叶子条目 ${fmtInt(q.leafEntries)}</span>
+      <span class="chip leaf">索引 ${q.queryMs.toFixed(2)} ms</span>
+      <span class="chip">暴力 ${q.bruteMs.toFixed(2)} ms</span>
+      ${S.treeDim===3?'<span class="chip">3D 索引 · 时间为第三轴</span>':''}
+    </div>
+    <div class="line">${lv}</div>`;
+}
+
+// ===================================================================== events
+function bindUI(){
+  const cv=S.canvas;
+  let mode=null; // "pan" | "box"
+  let start=null;
+
+  cv.addEventListener("mousedown",e=>{
+    if(e.button!==0) return;
+    const r=cv.getBoundingClientRect();
+    const sx=e.clientX-r.left, sy=e.clientY-r.top;
+    if(e.shiftKey){
+      mode="box";
+      const [wx,wy]=s2w(sx,sy);
+      start={sx,sy,wx0:wx,wy0:wy};
+      cv.classList.add("boxing");
+      S.queryBox=[wx,wy,wx,wy];
+    } else {
+      mode="pan";
+      start={sx,sy,vx:S.view.x,vy:S.view.y,moved:false};
+    }
+  });
+  cv.addEventListener("mousemove",e=>{
+    const r=cv.getBoundingClientRect();
+    const sx=e.clientX-r.left, sy=e.clientY-r.top;
+    if(mode==="pan"){
+      const dx=sx-start.sx, dy=sy-start.sy;
+      if(Math.abs(dx)+Math.abs(dy)>2) start.moved=true;
+      if(start.moved){
+        S.view.x=start.vx-dx/S.view.scale;
+        S.view.y=start.vy-dy/S.view.scale;
+        cv.classList.add("dragging");
+        draw();
+      }
+    } else if(mode==="box"){
+      const [wx,wy]=s2w(sx,sy);
+      S.queryBox=[Math.min(start.wx0,wx),Math.min(start.wy0,wy),
+                  Math.max(start.wx0,wx),Math.max(start.wy0,wy)];
+      draw();
+    } else {
+      updateTip(sx,sy);
+    }
+  });
+  cv.addEventListener("mouseup",async e=>{
+    const r=cv.getBoundingClientRect();
+    const sx=e.clientX-r.left, sy=e.clientY-r.top;
+    if(mode==="pan"){
+      cv.classList.remove("dragging");
+      if(!start.moved) { /* click: nothing */ }
+      else scheduleViewportLoad();
+      mode=null; start=null; return;
+    }
+    if(mode==="box"){
+      cv.classList.remove("boxing");
+      const [x0,y0]=s2w(start.sx,start.sy), [x1,y1]=s2w(sx,sy);
+      const box=[Math.min(x0,x1),Math.min(y0,y1),Math.max(x0,x1),Math.max(y0,y1)];
+      mode=null; start=null;
+      if(box[2]-box[0]<2||box[3]-box[1]<2){ S.queryBox=null; draw(); return; }
+      S.queryBox=box;
+      setInputs(box);
+      if($("auto-query").checked) await runRectQuery(box);
+      else draw();
+    }
+  });
+  cv.addEventListener("mouseleave",()=>{ if(mode==="pan"){cv.classList.remove("dragging");mode=null;} });
+  cv.addEventListener("contextmenu",e=>{
+    e.preventDefault();
+    const r=cv.getBoundingClientRect();
+    const [wx,wy]=s2w(e.clientX-r.left,e.clientY-r.top);
+    if(e.shiftKey) runWithin(wx,wy);
+    else runKNN(wx,wy);
+  });
+  cv.addEventListener("wheel",e=>{
+    e.preventDefault();
+    const r=cv.getBoundingClientRect();
+    const sx=e.clientX-r.left, sy=e.clientY-r.top;
+    const [wx,wy]=s2w(sx,sy);
+    const f=Math.exp(-e.deltaY*0.0014);
+    S.view.scale=Math.min(60,Math.max(0.003,S.view.scale*f));
+    S.view.x=wx-sx/S.view.scale;
+    S.view.y=wy-sy/S.view.scale;
+    draw();
+    scheduleViewportLoad();
+  },{passive:false});
+
+  document.querySelectorAll(".tabs button").forEach(b=>{
+    b.addEventListener("click",()=>selectTab(b.dataset.tab));
+  });
+  window.addEventListener("hashchange",()=>selectTab(location.hash.slice(1)));
+
+  $("level-slider").addEventListener("input",()=>setVisibleLevel(+$("level-slider").value));
+  $("k-slider").addEventListener("input",()=>{$("k-val").textContent=$("k-slider").value;});
+  $("rad-slider").addEventListener("input",()=>{$("rad-val").textContent=$("rad-slider").value+" m";});
+  $("btn-within").addEventListener("click",()=>toast("按住 Shift 在地图上右键点击"));
+  for(const [id,key] of [["show-crowns","showCrowns"],["show-sample","showSample"],
+      ["show-mbr","showMBR"],["show-all-nodes","showAllNodes"],["show-entry-rects","showEntryRects"]]){
+    const el=$(id);
+    if(!el) continue;
+    el.addEventListener("change",e=>{ S[key]=e.target.checked; draw(); });
+  }
+  $("btn-query").addEventListener("click",()=>toast("按住 Shift 在地图上拖动即可画框"));
+  $("btn-fit").addEventListener("click",()=>{
+    const b=S.meta.bounds; fitBounds([b[0],b[1],b[2],b[3]]); draw(); scheduleViewportLoad();
+  });
+  $("btn-fit-query").addEventListener("click",()=>{
+    if(!S.queryBox) return toast("还没有查询框");
+    const b=S.queryBox, pad=0.18, w=b[2]-b[0], h=b[3]-b[1];
+    fitBounds([b[0]-w*pad,b[1]-h*pad,b[2]+w*pad,b[3]+h*pad]); draw();
+  });
+  $("btn-query-here").addEventListener("click",()=>runRectQuery());
+  $("crown-exact").addEventListener("change",()=>{ if(S.query) runRectQuery(); });
+  $("btn-knn").addEventListener("click",()=>toast("在地图上右键点击任意位置"));
+  $("btn-insert").addEventListener("click",()=>mutate("insert"));
+  $("btn-delete").addEventListener("click",()=>mutate("delete"));
+  $("btn-bulk").addEventListener("click",async()=>{
+    const res=await post("/api/mutate",{action:"rebuildBulk"});
+    toast(`STR 重建完成：树高 ${res.height}，${res.ms.toFixed(1)} ms`);
+    await refreshAll();
+  });
+  $("btn-ab").addEventListener("click",async()=>{
+    $("ab-panel").innerHTML='<p class="hint">正在建两棵树并跑同批查询…</p>';
+    try{ const ab=await api("/api/ab"); S.ab=ab; renderAB(ab); }
+    catch(err){ $("ab-panel").innerHTML='<p class="hint" style="color:var(--bad)">'+err.message+'</p>'; }
+  });
+  $("btn-verify").addEventListener("click",()=>{
+    $("verify-panel").innerHTML=`<p class="hint">
+      完整对拍请运行 <code>go run ./cmd/verify</code>（约 2 分钟）：4.5 万棵树，26 万次随机插入/删除/2D·3D 范围查询/最近邻/施工红线查询，
+      每次结果都与暴力遍历全部古树比对，并输出强制重插入开/关的平均访问节点数与重叠面积。</p>`;
+  });
+  window.addEventListener("resize",()=>{ resize(); });
+  // Tabs must be wired before any async loading so the page is usable even
+  // if a fetch is slow.
+}
+
+function selectTab(name){
+  if(!["query","levels","quality"].includes(name)) name="query";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x.dataset.tab===name));
+  for(const id of ["query","levels","quality"]){
+    $("tab-"+id).style.display = id===name?"":"none";
+  }
+}
+
+async function mutate(action){
+  const b=S.queryBox||getInputs();
+  const cx=(b[0]+b[2])/2, cy=(b[1]+b[3])/2;
+  const n=+$("mut-n").value, radius=+$("mut-r").value;
+  try{
+    const res=await post("/api/mutate",{action,count:n,cx,cy,radius});
+    toast(action==="insert"
+      ? `插入 ${res.inserted} 棵，树高 ${res.height}，${res.ms.toFixed(1)} ms`
+      : `删除 ${res.deleted} 棵，树高 ${res.height}，${res.ms.toFixed(1)} ms`);
+    await refreshAll();
+  }catch(e){ toast(e.message); }
+}
+
+function updateTip(sx,sy){
+  const tip=$("tip");
+  if(!S.query){ tip.style.display="none"; return; }
+  const [wx,wy]=s2w(sx,sy);
+  let best=null;
+  for(const v of S.query.trace){
+    const n=S.nodeByID.get(v.id);
+    if(!n) continue;
+    const b=n.bounds;
+    if(wx>=b[0]&&wx<=b[2]&&wy>=b[1]&&wy<=b[3]){
+      if(!best||n.level<best.n.level) best={n,v};
+    }
+  }
+  if(!best){ tip.style.display="none"; return; }
+  const {n,v}=best;
+  const c=LEVEL_COLORS[n.level%LEVEL_COLORS.length];
+  tip.style.display="block";
+  tip.style.left=Math.min(sx+14,S.canvas.clientWidth-300)+"px";
+  tip.style.top=(sy+12)+"px";
+  tip.innerHTML=`<div style="color:${c}">节点 #${n.id} · L${n.level}${n.leaf?" 叶子":""}</div>
+    <div class="d">子树命中 <b style="color:#e58b5a">${v.hits}</b> 棵</div>
+    <div class="d">矩形 ${n.bounds[0].toFixed(0)},${n.bounds[1].toFixed(0)} → ${n.bounds[2].toFixed(0)},${n.bounds[3].toFixed(0)}</div>
+    <div class="d">${n.entries.length} 个条目 · 本层共 ${S.nodes.filter(x=>x.level===n.level).length} 节点</div>
+    ${v.hits===0?'<div class="d">矩形相交但子树无命中</div>':''}`;
+}
+
+// ===================================================================== boot
+async function refreshAll(){
+  const keep=S.queryBox;
+  const recs=[...S.records.values()];
+  S.records=new Map();
+  await loadMeta(); await loadTree(); await loadSampleRecords();
+  for(const r of recs) S.records.set(r.id,r);
+  if(keep){ await runRectQuery(keep); }
+  else { draw(); }
+}
+
+async function boot(){
+  S.canvas=$("cv"); S.ctx=S.canvas.getContext("2d");
+  bindUI(); resize();
+  try{
+    await loadMeta(); await loadTree();
+    $("loading").textContent="正在加载树冠…";
+    await loadSampleRecords();
+    const b=S.meta.bounds;
+    fitBounds([b[0],b[1],b[2],b[3]]);
+    await loadViewportRecords();
+    // Seed an informative query over the densest area found in a sample.
+    let cx=(b[0]+b[2])/2, cy=(b[1]+b[3])/2;
+    let bestN=-1;
+    const cell=1400, grid=new Map();
+    for(const r of S.records.values()){
+      const k=Math.floor(r.x/cell)+","+Math.floor(r.y/cell);
+      const c=grid.get(k)||{n:0,x:0,y:0};
+      c.n++; c.x+=r.x; c.y+=r.y; grid.set(k,c);
+    }
+    for(const c of grid.values()){
+      if(c.n>bestN){ bestN=c.n; cx=c.x/c.n; cy=c.y/c.n; }
+    }
+    const w=1200, h=1200;
+    S.queryBox=[cx-w/2,cy-h/2,cx+w/2,cy+h/2];
+    setInputs(S.queryBox);
+    // Zoom to the query neighbourhood so nodes and crowns are legible from
+    // the first screen; the whole city remains one wheel-zoom away.
+    fitBounds([S.queryBox[0]-w*0.45,S.queryBox[1]-w*0.45,
+               S.queryBox[2]+w*0.45,S.queryBox[3]+w*0.45]);
+    await runRectQuery(S.queryBox);
+    await loadViewportRecords();
+  }catch(err){
+    $("loading").textContent="加载失败："+err.message;
+    return;
+  }
+  $("loading").classList.add("hide");
+  setTimeout(()=>{ $("loading").style.display="none"; },400);
+  window.__ready=true;
+  selectTab(location.hash.slice(1)||"query");
+  draw();
+}
+document.addEventListener("DOMContentLoaded",boot);
+</script>
+</body>
+</html>
