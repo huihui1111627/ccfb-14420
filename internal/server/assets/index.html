@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>古树名木 R* 树索引结构</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg: #0f1419; --panel: #171e26; --panel2: #1e2732; --line: #2b3745;
+  --ink: #e6edf3; --muted: #93a1b0; --accent: #5bc0eb; --hit: #f6c453;
+  --visit: #ff6b6b; --ok: #7ee787;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+header { display: flex; align-items: baseline; gap: 18px; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .meta { color: var(--muted); font-size: 12px; }
+main { display: grid; grid-template-columns: 300px 1fr 320px; height: calc(100vh - 46px); }
+aside { overflow: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 12px; }
+aside.right { border-right: none; border-left: 1px solid var(--line); }
+section { margin-bottom: 18px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  margin: 0 0 8px; font-weight: 600; }
+label { display: block; color: var(--muted); margin: 6px 0 2px; font-size: 12px; }
+input, select, button { width: 100%; background: var(--panel2); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font: inherit; }
+button { cursor: pointer; background: #243140; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #1f4e63; border-color: #2f7d9e; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.tabs button { flex: 1; }
+.tabs button.on { background: #1f4e63; border-color: var(--accent); }
+#canvasWrap { position: relative; overflow: hidden; background: #0b1015; }
+canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+.hint { position: absolute; left: 10px; bottom: 8px; color: var(--muted); font-size: 11px;
+  background: rgba(15,20,25,.75); padding: 3px 7px; border-radius: 4px; pointer-events: none; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: right; padding: 3px 4px; border-bottom: 1px solid #232d38; }
+th:first-child, td:first-child { text-align: left; }
+td.bar { position: relative; }
+td.bar span { display: block; height: 8px; border-radius: 2px; background: var(--accent); }
+.name { font-weight: 600; }
+.pill { display: inline-block; padding: 1px 6px; border-radius: 9px; font-size: 11px;
+  background: #26323f; color: var(--muted); margin-right: 4px; }
+.stat { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid #232d38; }
+.stat span:last-child { font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border: 1px solid; margin-right: 4px;
+  vertical-align: -1px; }
+.err { color: var(--visit); }
+#resultList { max-height: 260px; overflow: auto; font-size: 12px; }
+#resultList div { padding: 2px 4px; border-bottom: 1px solid #232d38; }
+</style>
+</head>
+<body>
+<header>
+  <h1>古树名木 R* 树空间索引</h1>
+  <span class="meta" id="hdrMeta">加载中…</span>
+</header>
+<main>
+  <aside class="left">
+    <section>
+      <h2>索引</h2>
+      <label>维度</label>
+      <select id="dims">
+        <option value="2">2 维（x, y）</option>
+        <option value="3">3 维（x, y, 巡查月份）</option>
+      </select>
+      <label>显示层级（0 = 叶子）</label>
+      <select id="level"></select>
+      <label>查询类型</label>
+      <div class="tabs" id="kindTabs">
+        <button data-kind="range" class="on">范围</button>
+        <button data-kind="polygon">红线</button>
+        <button data-kind="nearest">最近邻</button>
+      </div>
+      <div id="queryParams"></div>
+      <div id="dateParams" style="display:none">
+        <label>巡查日期区间（月，2020-01 起）</label>
+        <div class="row"><input id="d0" type="number" value="0"><input id="d1" type="number" value="120"></div>
+        <div style="font-size:11px;color:var(--muted)" id="dateHint">0 = 2020-01，120 = 2030-01</div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="runQuery" class="primary">查询</button>
+        <button id="randomQuery">随机查询</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="insertTree">插入古树</button>
+        <button id="deleteTree">删除古树</button>
+      </div>
+    </section>
+    <section>
+      <h2>显示</h2>
+      <div class="legend">
+        <span><i style="border-color:#5bc0eb"></i>节点外接矩形（3D 为 x-y 足迹）</span>
+        <span><i style="border-color:#f6c453"></i>命中</span>
+        <span><i style="border-color:#ff6b6b"></i>访问节点</span>
+      </div>
+      <label><input type="checkbox" id="showTrees" checked style="width:auto"> 显示树冠</label>
+      <label><input type="checkbox" id="showQuery" checked style="width:auto"> 显示查询图形</label>
+      <label><input type="checkbox" id="showHits" checked style="width:auto"> 高亮命中结果</label>
+      <label><input type="checkbox" id="showOverlap" style="width:auto"> 本层重叠热力图（右上角全城）</label>
+    </section>
+    <section>
+      <h2>本次查询</h2>
+      <div class="stat"><span>访问节点</span><span id="qNodes">—</span></div>
+      <div class="stat"><span>检查条目</span><span id="qEntries">—</span></div>
+      <div class="stat"><span>结果数</span><span id="qCount">—</span></div>
+      <div id="perLevel" style="margin-top:8px"></div>
+      <div id="resultList" style="margin-top:8px"></div>
+    </section>
+  </aside>
+
+  <div id="canvasWrap">
+    <canvas id="canvas"></canvas>
+    <div class="hint" id="hint">拖拽平移 · 滚轮缩放 · Shift+拖拽框选范围内查询</div>
+  </div>
+
+  <aside class="right">
+    <section>
+      <h2>整棵树</h2>
+      <div id="treeStats"></div>
+    </section>
+    <section>
+      <h2>各层重叠 / 覆盖</h2>
+      <table id="levelTable">
+        <thead><tr><th>层</th><th>节点</th><th id="covHead">覆盖面积</th><th>重叠面积</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>本层重叠统计</h2>
+      <div id="overlapSummary"></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        勾选左侧“本层重叠热力图”可在图上查看：绿色 = 1 个矩形覆盖，红色越深 = 越多矩形重叠（对数色阶）。
+      </div>
+    </section>
+  </aside>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const state = {
+  dims: 2, level: 1, kind: "range",
+  view: { x0: 9600, y0: 6800, w: 6400, h: 4000 },
+  nodes: [], trees: [], lines: [], stats: null,
+  query: null, selected: null, overlap: null,
+};
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+async function postJSON(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+
+// Areas are square metres, volumes are square-metre-months.
+const fmtArea = (v) => {
+  if (!isFinite(v)) return "—";
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + " km²";
+  if (v >= 1e4) return (v / 1e4).toFixed(1) + " 万 m²";
+  return Math.round(v) + " m²";
+};
+const fmtVol = (v) => {
+  if (!isFinite(v)) return "—";
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + " ×10⁹ m²·月";
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + " ×10⁶ m²·月";
+  return Math.round(v) + " m²·月";
+};
+
+function areaLabel(dims) { return dims === 3 ? "体积" : "面积"; }
+
+// --- camera -------------------------------------------------------------
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+let dpr = window.devicePixelRatio || 1;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function worldToScreen(x, y) {
+  const v = state.view;
+  return [ (x - v.x0) / v.w * canvas.width, (y - v.y0) / v.h * canvas.height ];
+}
+function screenToWorld(px, py) {
+  const v = state.view;
+  return [ v.x0 + px / canvas.width * v.w, v.y0 + py / canvas.height * v.h ];
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#0b1015";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawGrid();
+  if ($("showOverlap").checked && state.overlap) drawOverlap();
+
+  // tree crowns
+  if ($("showTrees").checked) {
+    ctx.lineWidth = 0.7 * dpr;
+    ctx.strokeStyle = "rgba(126,231,135,0.30)";
+    for (const t of state.trees) { strokePoly(t.crown); }
+  }
+
+  // red lines
+  ctx.lineWidth = 1.2 * dpr;
+  for (const l of state.lines) {
+    ctx.strokeStyle = "rgba(255,107,107,0.55)";
+    ctx.setLineDash([6 * dpr, 4 * dpr]);
+    strokePoly(l.poly);
+  }
+  ctx.setLineDash([]);
+
+  // node rectangles at the selected level
+  const visited = new Set(state.query ? (state.query.visited || []) : []);
+  for (const n of state.nodes) {
+    const [x0, y0] = worldToScreen(n.rect[0], n.rect[1]);
+    const [x1, y1] = worldToScreen(n.rect[2], n.rect[3]);
+    const isVisited = visited.has(n.id);
+    ctx.lineWidth = (isVisited ? 2.4 : 1.0) * dpr;
+    ctx.strokeStyle = isVisited ? "rgba(255,107,107,0.95)" : levelColor(n.level, 0.85);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  }
+
+  // query shape
+  if (state.query && $("showQuery").checked) drawQueryShape();
+
+  // hits
+  if (state.query && $("showHits").checked) {
+    ctx.lineWidth = 2.0 * dpr;
+    ctx.strokeStyle = "rgba(246,196,83,0.95)";
+    ctx.fillStyle = "rgba(246,196,83,0.16)";
+    for (const t of state.query.results || []) {
+      const [x0, y0] = worldToScreen(t.bbox[0], t.bbox[1]);
+      const [x1, y1] = worldToScreen(t.bbox[2], t.bbox[3]);
+      ctx.fillRect(x0, y0, Math.max(2, x1 - x0), Math.max(2, y1 - y0));
+      ctx.strokeRect(x0, y0, Math.max(2, x1 - x0), Math.max(2, y1 - y0));
+    }
+  }
+}
+
+// drawOverlap paints the level's overlap grid as a small inset panel in the
+// top-right of the map, so it annotates the structure drawing instead of
+// covering it. It uses the same world-to-2-D mapping as the node rectangles.
+function drawOverlap() {
+  const o = state.overlap;
+  const v = state.view;
+  const size = 132 * dpr;
+  const pad = 10 * dpr;
+  const px = canvas.width - size - pad;
+  const py = pad;
+  ctx.save();
+  ctx.fillStyle = "rgba(15,20,25,0.90)";
+  ctx.strokeStyle = "rgba(43,55,69,0.95)";
+  ctx.lineWidth = 1 * dpr;
+  ctx.fillRect(px - pad, py - pad, size + 2 * pad, size + 2 * pad + 16 * dpr);
+  ctx.strokeRect(px - pad, py - pad, size + 2 * pad, size + 2 * pad + 16 * dpr);
+  const cell = size / o.n;
+  for (let i = 0; i < o.n; i++) {
+    for (let j = 0; j < o.n; j++) {
+      const c = o.cells[i * o.n + j].count;
+      if (c === 0) { ctx.fillStyle = "rgba(35,45,56,0.55)"; }
+      else if (c === 1) { ctx.fillStyle = "rgba(126,231,135,0.55)"; }
+      else {
+        const t = Math.min(1, Math.log2(c) / Math.max(1, Math.log2(Math.max(2, o.maxCount))));
+        ctx.fillStyle = `rgba(255,107,107,${0.25 + 0.65 * t})`;
+      }
+      ctx.fillRect(px + j * cell, py + i * cell, cell + 0.6, cell + 0.6);
+    }
+  }
+  ctx.fillStyle = "rgba(230,237,243,0.9)";
+  ctx.font = `${10 * dpr}px system-ui`;
+  ctx.fillText(`L${o.level} 全城重叠网格 ${o.n}×${o.n}`, px, py + size + 12 * dpr);
+  ctx.restore();
+}
+
+function levelColor(level, alpha) {
+  const hues = [190, 205, 225, 250, 285, 320];
+  const h = hues[level % hues.length];
+  return `hsla(${h}, 65%, 62%, ${alpha})`;
+}
+
+function drawGrid() {
+  const v = state.view;
+  const step = niceStep(v.w / 8);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(43,55,69,0.6)";
+  ctx.fillStyle = "rgba(147,161,176,0.75)";
+  ctx.font = `${11 * dpr}px system-ui`;
+  const startX = Math.ceil(v.x0 / step) * step;
+  for (let x = startX; x <= v.x0 + v.w; x += step) {
+    const [px] = worldToScreen(x, 0);
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height); ctx.stroke();
+    ctx.fillText(String(Math.round(x)), px + 3 * dpr, canvas.height - 6 * dpr);
+  }
+  const startY = Math.ceil(v.y0 / step) * step;
+  for (let y = startY; y <= v.y0 + v.h; y += step) {
+    const [, py] = worldToScreen(0, y);
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(canvas.width, py); ctx.stroke();
+    ctx.fillText(String(Math.round(y)), 4 * dpr, py - 3 * dpr);
+  }
+}
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
+  const m = raw / p;
+  const s = m < 2 ? 1 : m < 5 ? 2 : 5;
+  return s * p;
+}
+
+function strokePoly(poly) {
+  if (!poly || poly.length < 2) return;
+  ctx.beginPath();
+  for (let i = 0; i < poly.length; i++) {
+    const [px, py] = worldToScreen(poly[i][0], poly[i][1]);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.stroke();
+}
+
+function drawQueryShape() {
+  const q = state.query.query;
+  if (!q) return;
+  ctx.strokeStyle = "rgba(91,192,235,0.95)";
+  ctx.lineWidth = 2 * dpr;
+  ctx.setLineDash([8 * dpr, 5 * dpr]);
+  if (q.rect) {
+    const [x0, y0] = worldToScreen(q.rect[0], q.rect[1]);
+    const [x1, y1] = worldToScreen(q.rect[2], q.rect[3]);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  }
+  if (q.poly) strokePoly(q.poly);
+  if (q.point) {
+    const [px, py] = worldToScreen(q.point[0], q.point[1]);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(px, py, 5 * dpr, 0, Math.PI * 2);
+    ctx.stroke();
+    if (q.maxDist) {
+      const scale = canvas.width / state.view.w;
+      ctx.beginPath();
+      ctx.arc(px, py, q.maxDist * scale, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(91,192,235,0.35)";
+      ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+}
+
+// --- interaction --------------------------------------------------------
+let drag = null;
+canvas.addEventListener("mousedown", (e) => {
+  const r = canvas.getBoundingClientRect();
+  drag = { sx: e.clientX - r.left, sy: e.clientY - r.top, v: { ...state.view }, shift: e.shiftKey, moved: false };
+});
+canvas.addEventListener("mousemove", (e) => {
+  const r = canvas.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (!drag) { updateHint(x, y); return; }
+  if (Math.abs(x - drag.sx) + Math.abs(y - drag.sy) > 3) drag.moved = true;
+  if (drag.shift) {
+    state.selRect = [drag.sx, drag.sy, x, y];
+    drawSelection();
+    return;
+  }
+  const dx = (x - drag.sx) / canvas.width * drag.v.w;
+  const dy = (y - drag.sy) / canvas.height * drag.v.h;
+  state.view.x0 = drag.v.x0 - dx;
+  state.view.y0 = drag.v.y0 - dy;
+  draw();
+});
+canvas.addEventListener("mouseup", (e) => {
+  const r = canvas.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (drag && drag.shift && drag.moved) {
+    const [ax, ay] = screenToWorld(Math.min(drag.sx, x), Math.min(drag.sy, y));
+    const [bx, by] = screenToWorld(Math.max(drag.sx, x), Math.max(drag.sy, y));
+    runRange(ax, ay, bx, by);
+    state.selRect = null;
+  }
+  drag = null;
+});
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const [wx, wy] = screenToWorld(e.clientX - r.left, e.clientY - r.top);
+  const f = Math.exp(e.deltaY * 0.0012);
+  const v = state.view;
+  v.x0 = wx + (v.x0 - wx) * f;
+  v.y0 = wy + (v.y0 - wy) * f;
+  v.w *= f; v.h *= f;
+  draw();
+}, { passive: false });
+canvas.addEventListener("click", (e) => {
+  const r = canvas.getBoundingClientRect();
+  const [wx, wy] = screenToWorld(e.clientX - r.left, e.clientY - r.top);
+  if (state.kind === "nearest") {
+    runNearest(wx, wy);
+  } else if (state.kind === "range") {
+    const s = defaultSize();
+    runRange(wx - s / 2, wy - s / 2, wx + s / 2, wy + s / 2);
+  }
+});
+function drawSelection() {
+  draw();
+  if (!state.selRect) return;
+  const [a, b, c, d] = state.selRect;
+  ctx.strokeStyle = "rgba(91,192,235,0.9)";
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.setLineDash([5 * dpr, 4 * dpr]);
+  ctx.strokeRect(a * dpr, b * dpr, (c - a) * dpr, (d - b) * dpr);
+  ctx.setLineDash([]);
+}
+function updateHint(x, y) {
+  const [wx, wy] = screenToWorld(x, y);
+  $("hint").textContent = `x ${wx.toFixed(0)} · y ${wy.toFixed(0)} · 拖拽平移 · 滚轮缩放 · Shift+拖拽范围查询 · 点击查询`;
+}
+
+// --- data loading -------------------------------------------------------
+let loadToken = 0;
+async function refresh() {
+  const tok = ++loadToken;
+  const dims = state.dims;
+  const [stats, nodes] = await Promise.all([
+    getJSON(`/api/stats?dims=${dims}`),
+    getJSON(`/api/nodes?dims=${dims}&level=${state.level}`),
+  ]);
+  if (tok !== loadToken) return;
+  state.stats = stats;
+  state.nodes = nodes.nodes;
+  const v = state.view;
+  const trees = await getJSON(`/api/trees?x0=${v.x0}&y0=${v.y0}&x1=${v.x0 + v.w}&y1=${v.y0 + v.h}&dims=2`);
+  if (tok !== loadToken) return;
+  state.trees = trees.trees;
+  state.lines = trees.lines;
+  renderStats();
+  await refreshNodes();
+  draw();
+}
+
+function renderStats() {
+  const s = state.stats;
+  if (!s) return;
+  const dimLabel = s.dims === 3 ? "3 维外接盒（x, y, 巡查月份）" : "2 维外接矩形（x, y）";
+  $("hdrMeta").textContent = `${s.liveTrees} 棵挂牌古树 · ${s.nodeCount} 节点 · 高 ${s.height} · M=${s.maxEntries} · 强制重插入 ${s.forceReinsert ? "开" : "关"} · ${dimLabel}`;
+  $("treeStats").innerHTML = [
+    statLine("维度", s.dims + "D"),
+    statLine("层高", s.height),
+    statLine("节点总数", s.nodeCount),
+    statLine("叶子节点", s.leafCount),
+    statLine("索引条目", s.itemCount),
+    statLine("分裂次数", s.splits),
+    statLine("强制重插入", `${s.reinsertOps} 次 / ${s.reinsertEntries} 条目`),
+    statLine("删除收缩节点", s.condensedNodes),
+    statLine("整树重叠" + areaLabel(s.dims), s.dims === 3 ? fmtVol(s.totalOverlap) : fmtArea(s.totalOverlap)),
+    statLine(s.dims === 3 ? "整树覆盖体积" : "整树覆盖面积", s.dims === 3 ? fmtVol(s.totalCoverage) : fmtArea(s.totalCoverage)),
+  ].join("");
+  $("covHead").textContent = s.dims === 3 ? "覆盖足迹" : "覆盖面积";
+  const tbody = $("levelTable").querySelector("tbody");
+  const maxCov = Math.max(1, ...s.levels.map(l => l.coverage));
+  const maxOv = Math.max(1, ...s.levels.map(l => l.overlap));
+  tbody.innerHTML = s.levels.map(l => `
+    <tr>
+      <td>L${l.level}</td>
+      <td>${l.nodes}</td>
+      <td>${s.dims === 3 ? fmtArea(l.footprint) : fmtArea(l.coverage)}</td>
+      <td>${s.dims === 3 ? fmtVol(l.overlap) : fmtArea(l.overlap)}</td>
+    </tr>`).join("");
+  fillLevelSelect(s.height);
+}
+
+function statLine(k, v) { return `<div class="stat"><span>${k}</span><span>${v}</span></div>`; }
+
+function fillLevelSelect(height) {
+  const sel = $("level");
+  const want = [];
+  for (let l = 0; l < height; l++) want.push(l);
+  const sig = want.join(",");
+  if (sel.dataset.sig !== sig) {
+    sel.innerHTML = want.map(l => `<option value="${l}">L${l}${l === 0 ? " · 叶节点" : l === height - 1 ? " · 根" : ""}</option>`).join("");
+    sel.dataset.sig = sig;
+  }
+  state.level = Math.min(state.level, height - 1);
+  sel.value = String(state.level);
+}
+
+// --- query parameter forms ---------------------------------------------
+function defaultSize() { return Math.max(200, Math.min(3000, state.view.w / 6)); }
+
+function dateWindow() {
+  if (state.dims !== 3) return [0, 120];
+  const a = Number(($("d0") || {}).value ?? 0);
+  const b = Number(($("d1") || {}).value ?? 120);
+  return [Math.min(a, b), Math.max(a, b)];
+}
+
+function renderQueryParams() {
+  $("dateParams").style.display = state.dims === 3 ? "" : "none";
+  const q = $("queryParams");
+  if (state.kind === "range") {
+    q.innerHTML = `<label>范围边长（米）</label><input id="size" type="number" value="${Math.round(defaultSize())}">`;
+  } else if (state.kind === "polygon") {
+    q.innerHTML = `<label>施工红线（树冠多边形精确相交）</label><select id="lineSel"><option value="-1">随机红色线</option></select>
+      <label>或手填范围</label><div class="row"><input id="px0" type="number" value="9000"><input id="py0" type="number" value="9000"></div>
+      <div class="row"><input id="px1" type="number" value="9500"><input id="py1" type="number" value="9500"></div>`;
+    const sel = $("lineSel");
+    for (const l of state.lines) {
+      const o = document.createElement("option");
+      o.value = String(l.id);
+      o.textContent = `红线 #${l.id}`;
+      sel.appendChild(o);
+    }
+  } else {
+    q.innerHTML = `<label>查询点日期（月，2020-01 起）</label><input id="qz" type="number" value="60">
+      <label>取最近 k 棵</label><input id="k" type="number" value="8">
+      <label>最大距离（米，0 = 不限）</label><input id="maxDist" type="number" value="0">
+      <label>模式</label><select id="mode"><option value="k">取前 k 个</option><option value="iter">按距离递增连续取</option></select>
+      <label>连续取个数</label><input id="limit" type="number" value="200">`;
+  }
+}
+
+// --- query runners ------------------------------------------------------
+async function runRange(x0, y0, x1, y1) {
+  const dims = state.dims;
+  const p = new URLSearchParams({ kind: "range", dims, x0, y0, x1, y1 });
+  if (dims === 3) { const [d0, d1] = dateWindow(); p.set("d0", d0); p.set("d1", d1); }
+  await runQuery(`/api/query?${p}`);
+}
+async function runNearest(x, y) {
+  const dims = state.dims;
+  const k = Number(($("k") || {}).value || 8);
+  const maxDist = Number(($("maxDist") || {}).value || 0);
+  const mode = ($("mode") || {}).value || "k";
+  const limit = Number(($("limit") || {}).value || 200);
+  const z = Number(($("qz") || {}).value ?? 60);
+  const p = new URLSearchParams({ kind: "nearest", dims, x, y, z, k, maxDist, mode, limit });
+  await runQuery(`/api/query?${p}`);
+}
+async function runPolygon() {
+  const dims = state.dims;
+  const lineID = Number(($("lineSel") || {}).value || -1);
+  let p;
+  if (lineID >= 0) {
+    p = new URLSearchParams({ kind: "polygon", dims, line: lineID });
+  } else {
+    p = new URLSearchParams({ kind: "polygon", dims,
+      x0: ($("px0") || {}).value, y0: ($("py0") || {}).value,
+      x1: ($("px1") || {}).value, y1: ($("py1") || {}).value });
+  }
+  await runQuery(`/api/query?${p}`);
+}
+// fitToQuery pans/zooms the map so the query shape and all its hits are
+// visible, with a margin, so a red line picked from the list is never queried
+// off-screen.
+function fitToQuery(res) {
+  const xs = [], ys = [];
+  const push = (x, y) => { xs.push(x); ys.push(y); };
+  const q = res.query || {};
+  if (q.rect) { push(q.rect[0], q.rect[1]); push(q.rect[2], q.rect[3]); }
+  if (q.poly) for (const p of q.poly) push(p[0], p[1]);
+  if (q.point) push(q.point[0], q.point[1]);
+  for (const t of res.results || []) { push(t.bbox[0], t.bbox[1]); push(t.bbox[2], t.bbox[3]); }
+  if (!xs.length) return;
+  let x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  let w = Math.max(x1 - x0, 80), h = Math.max(y1 - y0, 80);
+  const m = Math.max(w, h) * 0.9;
+  w += m; h += m;
+  const aspect = canvas.width / Math.max(1, canvas.height);
+  if (w / h < aspect) w = h * aspect; else h = w / aspect;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  state.view = { x0: cx - w / 2, y0: cy - h / 2, w, h };
+}
+
+async function runQuery(url) {
+  try {
+    const res = await getJSON(url);
+    state.query = res;
+    fitToQuery(res);
+    $("qNodes").textContent = res.nodesVisited;
+    $("qEntries").textContent = res.entriesExamined;
+    $("qCount").textContent = res.count;
+    const total = res.perLevel.reduce((a, b) => a + b.nodes, 0) || 1;
+    $("perLevel").innerHTML = res.perLevel.map(l => {
+      const pct = 100 * l.nodes / total;
+      return `<div class="stat"><span>L${l.level} 访问节点</span><span>${l.nodes}</span></div>` +
+        `<div style="height:6px;background:#232d38;border-radius:2px;margin:0 0 6px"><div style="height:6px;width:${pct}%;background:var(--visit);border-radius:2px"></div></div>`;
+    }).join("");
+    const list = (res.results || []).map((t, i) => {
+      const d = res.distances ? ` · ${res.distances[i].toFixed(1)}m` : "";
+      return `<div>#${t.id} ${t.species} · (${t.x.toFixed(0)}, ${t.y.toFixed(0)})${d}</div>`;
+    }).join("");
+    $("resultList").innerHTML = list || `<div style="color:var(--muted)">无结果</div>`;
+    draw();
+  } catch (e) {
+    state.query = null;
+    $("resultList").innerHTML = `<div class="err">${e.message}</div>`;
+    draw();
+  }
+}
+
+// --- mutations ----------------------------------------------------------
+async function insertTree() {
+  const c = centerOfView();
+  try {
+    const t = await postJSON("/api/insert", { x: c[0], y: c[1] });
+    toast(`已插入 #${t.id} ${t.species}`);
+    await refresh();
+    await runRange(t.x - 100, t.y - 100, t.x + 100, t.y + 100);
+  } catch (e) { toast(e.message, true); }
+}
+async function deleteTree() {
+  const c = centerOfView();
+  try {
+    const res = await getJSON(`/api/trees?x0=${c[0] - 150}&y0=${c[1] - 150}&x1=${c[0] + 150}&y1=${c[1] + 150}&dims=2`);
+    if (!res.trees.length) { toast("视野中心附近没有古树"); return; }
+    const t = res.trees[0];
+    await postJSON("/api/delete", { id: t.id });
+    toast(`已删除 #${t.id}`);
+    await refresh();
+  } catch (e) { toast(e.message, true); }
+}
+function toast(msg, isErr) {
+  const el = $("hint");
+  const prev = el.textContent;
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--visit)" : "var(--ok)";
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.textContent = prev; el.style.color = ""; }, 2500);
+}
+
+function centerOfView() {
+  const v = state.view;
+  return [v.x0 + v.w / 2, v.y0 + v.h / 2];
+}
+
+// --- wiring -------------------------------------------------------------
+$("dims").addEventListener("change", async (e) => {
+  state.dims = Number(e.target.value);
+  state.query = null;
+  renderQueryParams();
+  await refresh();
+});
+$("level").addEventListener("change", async (e) => {
+  state.level = Number(e.target.value);
+  await refreshNodes();
+});
+async function refreshNodes() {
+  const [nodes, ov] = await Promise.all([
+    getJSON(`/api/nodes?dims=${state.dims}&level=${state.level}`),
+    getJSON(`/api/overlap?dims=${state.dims}&level=${state.level}&n=64`),
+  ]);
+  state.nodes = nodes.nodes;
+  state.overlap = ov;
+  renderOverlapSummary(ov);
+  draw();
+}
+
+function renderOverlapSummary(o) {
+  const total = o.n * o.n;
+  const covPct = 100 * o.covered / total;
+  const ovPct = 100 * o.overlapped / Math.max(1, o.covered);
+  const plane = o.plane;
+  const overlapVal = plane ? o.planeOverlap : o.exactOverlap;
+  $("overlapSummary").innerHTML = [
+    statLine("层", "L" + o.level + (plane ? "（x-y 投影）" : "")),
+    statLine("被覆盖格子", `${o.covered} / ${total} (${covPct.toFixed(1)}%)`),
+    statLine("被≥2个矩形覆盖", `${o.overlapped} 格 (占覆盖 ${ovPct.toFixed(1)}%)`),
+    statLine("该层外接矩形两两重叠", fmtArea(overlapVal) + (plane && o.planeArea > 0 ? ` / 覆盖 ${fmtArea(o.planeArea)}` : "")),
+    plane ? statLine("该层 3 维外接盒重叠", fmtVol(o.exactOverlap)) : "",
+    statLine("单格最多矩形数", o.maxCount),
+  ].join("");
+}
+$("kindTabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  state.kind = b.dataset.kind;
+  for (const x of $("kindTabs").children) x.classList.toggle("on", x === b);
+  renderQueryParams();
+});
+$("runQuery").addEventListener("click", () => {
+  const c = centerOfView();
+  if (state.kind === "range") {
+    const s = Number($("size").value || defaultSize());
+    runRange(c[0] - s / 2, c[1] - s / 2, c[0] + s / 2, c[1] + s / 2);
+  } else if (state.kind === "polygon") {
+    runPolygon();
+  } else {
+    runNearest(c[0], c[1]);
+  }
+});
+$("randomQuery").addEventListener("click", async () => {
+  const v = state.view;
+  const x = v.x0 + Math.random() * v.w, y = v.y0 + Math.random() * v.h;
+  if (state.kind === "nearest") await runNearest(x, y);
+  else {
+    const s = defaultSize() * (0.5 + Math.random());
+    if (state.kind === "range") await runRange(x - s / 2, y - s / 2, x + s / 2, y + s / 2);
+    else { await runPolygon(); }
+  }
+});
+$("insertTree").addEventListener("click", insertTree);
+$("deleteTree").addEventListener("click", deleteTree);
+for (const id of ["showTrees", "showQuery", "showHits"]) $(id).addEventListener("change", draw);
+$("showOverlap").addEventListener("change", async () => {
+  if ($("showOverlap").checked && !state.overlap) await refreshNodes();
+  draw();
+});
+
+(async function boot() {
+  dpr = window.devicePixelRatio || 1;
+  renderQueryParams();
+  resize();
+  await refresh();
+  // Show something immediately: a range query over a district.
+  const c = centerOfView();
+  const input = $("size");
+  const s = input ? Number(input.value || 1400) : 1400;
+  await runRange(c[0] - s / 2, c[1] - s / 2, c[0] + s / 2, c[1] + s / 2);
+})();
+</script>
+</body>
+</html>
